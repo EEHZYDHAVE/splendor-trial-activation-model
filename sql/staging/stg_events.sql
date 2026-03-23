@@ -7,7 +7,7 @@
 --              mart models depend on this staging layer. No mart model should
 --              ever read directly from the raw source.
 -- Grain:       One row per event (organisation + activity + timestamp)
--- Dependencies: raw source table (raw_events)
+-- Dependencies: raw_events
 -- =============================================================================
 
 WITH
@@ -17,15 +17,11 @@ typed AS (
     SELECT
         organization_id,
         activity_name,
-        CAST(timestamp    AS TIMESTAMP) AS event_timestamp,
-        CAST(trial_start  AS TIMESTAMP) AS trial_start,
-        CAST(trial_end    AS TIMESTAMP) AS trial_end,
+        CAST(timestamp   AS TIMESTAMP) AS event_timestamp,
+        CAST(trial_start AS TIMESTAMP) AS trial_start,
+        CAST(trial_end   AS TIMESTAMP) AS trial_end,
         converted,
-        CASE
-            WHEN converted_at IS NULL OR converted_at = 'None'
-            THEN NULL
-            ELSE CAST(converted_at AS TIMESTAMP)
-        END AS converted_at
+        TRY_CAST(converted_at AS TIMESTAMP) AS converted_at
     FROM raw_events
     WHERE organization_id IS NOT NULL
       AND activity_name   IS NOT NULL
@@ -36,13 +32,10 @@ typed AS (
 with_time_fields AS (
     SELECT
         *,
-        -- Calendar day of trial (Day 0 = first day, Day 30 = last day)
         DATEDIFF('day',
             DATE_TRUNC('day', trial_start),
             DATE_TRUNC('day', event_timestamp)
         ) AS day_of_trial,
-
-        -- Days between conversion and trial end (negative = converted early)
         CASE
             WHEN converted_at IS NOT NULL
             THEN DATEDIFF('day',
@@ -54,26 +47,24 @@ with_time_fields AS (
     FROM typed
 ),
 
--- ── Step 3: Filter to valid trial window (Day 0 to Day 30 inclusive) ─────────
+-- ── Step 3: Filter to valid trial window ─────────────────────────────────────
 within_window AS (
     SELECT *
     FROM with_time_fields
     WHERE day_of_trial BETWEEN 0 AND 30
 ),
 
--- ── Step 4: Assign activity buckets based on product value hierarchy ─────────
+-- ── Step 4: Assign activity buckets ──────────────────────────────────────────
 with_buckets AS (
     SELECT
         *,
         CASE activity_name
-            -- Bucket 1: Entry Point Activities
             WHEN 'Scheduling.Shift.Created'                THEN 1
             WHEN 'Scheduling.Availability.Set'             THEN 1
             WHEN 'Scheduling.Template.ApplyModal.Applied'  THEN 1
             WHEN 'Mobile.Schedule.Loaded'                  THEN 1
             WHEN 'Shift.View.Opened'                       THEN 1
             WHEN 'ShiftDetails.View.Opened'                THEN 1
-            -- Bucket 2: Operational Commitment Activities
             WHEN 'Scheduling.ShiftSwap.Created'            THEN 2
             WHEN 'Scheduling.ShiftSwap.Accepted'           THEN 2
             WHEN 'Scheduling.ShiftHandover.Created'        THEN 2
@@ -91,7 +82,6 @@ with_buckets AS (
             WHEN 'Absence.Request.Created'                 THEN 2
             WHEN 'Absence.Request.Approved'                THEN 2
             WHEN 'Absence.Request.Rejected'                THEN 2
-            -- Bucket 3: Value Realisation Activities
             WHEN 'Scheduling.Shift.Approved'               THEN 3
             WHEN 'Timesheets.BulkApprove.Confirmed'        THEN 3
             WHEN 'Integration.Xero.PayrollExport.Synced'   THEN 3
@@ -99,8 +89,6 @@ with_buckets AS (
             WHEN 'Communication.Message.Created'           THEN 3
             ELSE NULL
         END AS activity_bucket,
-
-        -- Conversion timing classification
         CASE
             WHEN NOT converted
             THEN 'not_converted'
@@ -110,11 +98,10 @@ with_buckets AS (
             THEN 'post_trial_short'
             ELSE 'post_trial_long'
         END AS conversion_timing
-
     FROM within_window
 ),
 
--- ── Step 5: Remove same-second duplicates for known instrumentation events ────
+-- ── Step 5: Remove same-second duplicates for instrumentation events ──────────
 deduplicated AS (
     SELECT *
     FROM (
@@ -126,7 +113,6 @@ deduplicated AS (
             ) AS row_num
         FROM with_buckets
         WHERE activity_name IN (
-            -- Physically impossible to do twice in one second
             'PunchClock.PunchedIn',
             'Break.Activate.Started',
             'Break.Activate.Finished',
@@ -142,9 +128,7 @@ deduplicated AS (
 
     UNION ALL
 
-    SELECT
-        *,
-        1 AS row_num
+    SELECT *, 1 AS row_num
     FROM with_buckets
     WHERE activity_name NOT IN (
         'PunchClock.PunchedIn',
@@ -168,12 +152,12 @@ SELECT
     day_of_trial,
     converted,
     converted_at,
-    converted_at IS NOT NULL                    AS has_converted_at,
+    converted_at IS NOT NULL               AS has_converted_at,
     days_after_trial_end,
     conversion_timing,
     trial_start,
     trial_end,
-    DATE_TRUNC('day', trial_start)              AS trial_start_date,
-    DATE_TRUNC('day', trial_end)                AS trial_end_date,
-    DATE_TRUNC('month', trial_start)            AS trial_cohort_month
+    DATE_TRUNC('day', trial_start)         AS trial_start_date,
+    DATE_TRUNC('day', trial_end)           AS trial_end_date,
+    DATE_TRUNC('month', trial_start)       AS trial_cohort_month
 FROM deduplicated
