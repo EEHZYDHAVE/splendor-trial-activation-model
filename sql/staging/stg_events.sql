@@ -71,7 +71,7 @@ with_buckets AS (
             WHEN 'Scheduling.ShiftHandover.Accepted'       THEN 2
             WHEN 'Scheduling.OpenShiftRequest.Created'     THEN 2
             WHEN 'Scheduling.OpenShiftRequest.Approved'    THEN 2
-            WHEN 'Scheduling.ShiftAssignmentChanged'       THEN 2
+            WHEN 'Scheduling.Shift.AssignmentChanged'       THEN 2
             WHEN 'PunchClock.PunchedIn'                    THEN 2
             WHEN 'PunchClock.PunchedOut'                   THEN 2
             WHEN 'Break.Activate.Started'                  THEN 2
