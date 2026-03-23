@@ -1,0 +1,1 @@
+-- trial_activation.sql: data marts for Splendor trial event data
