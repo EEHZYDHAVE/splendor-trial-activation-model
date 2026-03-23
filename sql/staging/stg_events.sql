@@ -1,0 +1,1 @@
+-- stg_events: staging layer for Splendor trial event data
