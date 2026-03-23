@@ -29,6 +29,11 @@ typed AS (
 ),
 
 -- ── Step 2: Calculate derived time fields ────────────────────────────────────
+-- Note: conversion_timing classification uses calendar-day comparison
+-- via DATE_TRUNC. A minor 2-organisation difference exists versus the
+-- Python analysis in Notebook 1 due to sub-day timestamp precision
+-- handling between pandas and DuckDB. Total post-trial converters (101)
+-- is consistent across both engines.
 with_time_fields AS (
     SELECT
         *,
